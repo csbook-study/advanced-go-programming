@@ -1,6 +1,7 @@
 package concurrentmemory
 
 import (
+	"fmt"
 	"sync"
 )
 
@@ -17,4 +18,14 @@ func workerm(wg *sync.WaitGroup) {
 		totalm.value++
 		totalm.Unlock()
 	}
+}
+
+func addMutex() {
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go workerm(&wg)
+	go workerm(&wg)
+	wg.Wait()
+
+	fmt.Println(totalm.value)
 }

@@ -1,29 +1,15 @@
 package concurrentmemory
 
 import (
-	"fmt"
 	"runtime"
-	"sync"
 )
 
 func MutexBasis() {
-	var wg sync.WaitGroup
-	wg.Add(2)
-	go workerm(&wg)
-	go workerm(&wg)
-	wg.Wait()
-
-	fmt.Println(totalm.value)
+	addMutex()
 }
 
 func AtomicBasis() {
-	var wg sync.WaitGroup
-	wg.Add(2)
-	go workera(&wg)
-	go workera(&wg)
-	wg.Wait()
-
-	fmt.Println(totala)
+	addAtomic()
 }
 
 func SingletonBasis() {
@@ -55,4 +41,13 @@ func ConfigBasis() {
 func ChannelBasis() {
 	syncGoroutine()
 	countGoroutine()
+}
+
+func WaitGroupBasis() {
+	helloWG()
+	cancelWG()
+}
+
+func ContextBasis() {
+	cancelContext()
 }

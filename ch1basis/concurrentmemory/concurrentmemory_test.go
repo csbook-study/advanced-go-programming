@@ -31,3 +31,15 @@ func TestChannelBasis(t *testing.T) {
 		ChannelBasis()
 	})
 }
+
+func TestWaitGroupBasis(t *testing.T) {
+	t.Run("WaitGroupBasis", func(t *testing.T) {
+		WaitGroupBasis()
+	})
+}
+
+func TestContextBasis(t *testing.T) {
+	t.Run("ContextBasis", func(t *testing.T) {
+		ContextBasis()
+	})
+}

@@ -43,4 +43,12 @@ func countGoroutine() {
 		}(w)
 	}
 	wg.Wait()
+
 }
+
+// 通过带缓存通道的发送和接收规则可以实现最大并发阻塞，封装函数更加优雅
+type gate chan bool
+
+func (g gate) enter() { g <- true }
+
+func (g gate) leave() { <-g }
