@@ -56,3 +56,6 @@ Protobuf的protoc编译器是通过插件机制实现对不同语言的支持。
 ```bash
 protoc --go-netrpc_out=plugins=netrpc:. hello.proto
 ```
+
+## 4.3 玩转RPC
+
