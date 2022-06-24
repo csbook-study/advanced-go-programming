@@ -100,3 +100,285 @@ RPC是远程函数调用，因此每次调用的函数参数和返回值不能�
 关键字stream指定启用流特性，参数部分是接收客户端参数的流，返回值是返回给客户端的流。
 
 服务端在循环中接收客户端发来的数据，如果遇到io.EOF表示客户端流被关闭，如果函数退出表示服务端流关闭。生成返回的数据通过流发送给客户端，双向流数据的发送和接收都是完全独立的行为。需要注意的是，发送和接收的操作并不需要一一对应，用户可以根据真实场景进行组织代码。
+
+## 4.5 gRPC 进阶
+
+### 证书认证
+
+gRPC建立在HTTP/2协议之上，对TLS提供了很好的支持。没有启用证书的gRPC服务在和客户端进行的是明文通讯，信息面临被任何第三方监听的风险。为了保障gRPC通信不被第三方监听篡改或伪造，我们可以对服务器启动TLS加密特性。
+
+**公钥认证**
+
+为服务器和客户端分别生成私钥和证书：
+
+```bash
+# server 公钥生成
+openssl genrsa -out server.key 2048
+openssl req -new -x509 -days 3650 \
+    -subj "/C=GB/L=China/O=grpc-server/CN=server.grpc.io" \
+    -key server.key -out server.crt
+
+# client 公钥生成
+openssl genrsa -out client.key 2048
+openssl req -new -x509 -days 3650 \
+    -subj "/C=GB/L=China/O=grpc-client/CN=client.grpc.io" \
+    -key client.key -out client.crt
+```
+
+这种方式，需要提前将服务器的证书告知客户端，这样客户端在链接服务器时才能进行对服务器证书认证。在复杂的网络环境中，服务器证书的传输本身也是一个非常危险的问题。如果在中间某个环节，服务器证书被监听或替换那么对服务器的认证也将不再可靠。
+
+**签名认证**
+
+为了避免证书的传递过程中被篡改，可以通过一个安全可靠的根证书分别对服务器和客户端的证书进行签名。这样客户端或服务器在收到对方的证书后可以通过根证书进行验证证书的有效性。
+
+根证书的生成方式和自签名证书的生成方式类似：
+
+```bash
+# ca 生成
+openssl genrsa -out ca.key 2048
+openssl req -new -x509 -days 3650 \
+    -subj "/C=GB/L=China/O=gobook/CN=github.com" \
+    -key ca.key -out ca.crt
+
+# server ca 签名
+openssl req -new \
+    -subj "/C=GB/L=China/O=server/CN=server.io" \
+    -key server.key \
+    -out server.csr
+openssl x509 -req -sha256 \
+    -CA ca.crt -CAkey ca.key -CAcreateserial -days 3650 \
+    -in server.csr \
+    -out server.crt
+
+# client ca 签名
+openssl req -new \
+    -subj "/C=GB/L=China/O=client/CN=client.io" \
+    -key client.key \
+    -out client.csr
+openssl x509 -req -sha256 \
+    -CA ca.crt -CAkey ca.key -CAcreateserial -days 3650 \
+    -in client.csr \
+    -out client.crt
+```
+
+签名的过程中引入了一个新的以.csr为后缀名的文件，它表示证书签名请求文件。在证书签名完成之后可以删除.csr文件。
+
+创建包含SAN的证书
+
+```bash
+# ca 生成
+openssl genrsa -out ca.key 2048
+openssl req -new -x509 -days 3650 \
+    -subj "/C=GB/L=China/O=gobook/CN=github.com" \
+    -key ca.key -out ca.crt
+    
+openssl genrsa -out server.key 2048
+openssl req -new -sha256 \
+    -key server.key \
+    -subj "/C=GB/L=China/O=server/CN=server.io" \
+    -reqexts SAN \
+    -config <(cat /etc/pki/tls/openssl.cnf \
+        <(printf "\n[SAN]\nsubjectAltName=DNS:server.io,DNS:*.example.com")) \
+    -out server.csr
+openssl x509 -req -days 3650 \
+    -in server.csr -out server.pem \
+    -CA ca.crt -CAkey ca.key -CAcreateserial \
+    -extensions SAN \
+    -extfile <(cat /etc/pki/tls/openssl.cnf <(printf "[SAN]\nsubjectAltName=DNS:server.io,DNS:*.example.com"))
+
+openssl genrsa -out client.key 2048
+openssl req -new -sha256 \
+    -key client.key \
+    -subj "/C=GB/L=China/O=server/CN=server.io" \
+    -reqexts SAN \
+    -config <(cat /etc/pki/tls/openssl.cnf \
+        <(printf "\n[SAN]\nsubjectAltName=DNS:server.io,DNS:*.example.com")) \
+    -out client.csr
+openssl x509 -req -days 3650 \
+    -in client.csr -out client.pem \
+    -CA ca.crt -CAkey ca.key -CAcreateserial \
+    -extensions SAN \
+    -extfile <(cat /etc/pki/tls/openssl.cnf <(printf "[SAN]\nsubjectAltName=DNS:server.io,DNS:*.example.com"))
+```
+
+### Token认证
+
+gRPC为每个gRPC方法调用提供了认证支持，这样就基于用户Token对不同的方法访问进行权限管理。
+
+要实现对每个gRPC方法进行认证，需要实现grpc.PerRPCCredentials接口：
+
+```go
+type PerRPCCredentials interface {
+    // GetRequestMetadata gets the current request metadata, refreshing
+    // tokens if required. This should be called by the transport layer on
+    // each request, and the data should be populated in headers or other
+    // context. If a status code is returned, it will be used as the status
+    // for the RPC. uri is the URI of the entry point for the request.
+    // When supported by the underlying implementation, ctx can be used for
+    // timeout and cancellation.
+    // TODO(zhaoq): Define the set of the qualified keys instead of leaving
+    // it as an arbitrary string.
+    GetRequestMetadata(ctx context.Context, uri ...string) (
+        map[string]string,    error,
+    )
+    // RequireTransportSecurity indicates whether the credentials requires
+    // transport security.
+    RequireTransportSecurity() bool
+}
+```
+
+在GetRequestMetadata方法中返回认证需要的必要信息。RequireTransportSecurity方法表示是否要求底层使用安全链接。在真实的环境中建议必须要求底层启用安全的链接，否则认证信息有泄露和被篡改的风险。
+
+**详细地认证工作**：首先通过metadata.FromIncomingContext从ctx上下文中获取元信息，然后取出相应的认证信息进行认证。如果认证失败，则返回一个codes.Unauthenticated类型地错误。
+
+### 截取器
+
+gRPC中的grpc.UnaryInterceptor和grpc.StreamInterceptor分别对普通方法和流方法提供了截取器的支持。我们这里简单介绍普通方法的截取器用法。
+
+要实现普通方法的截取器，需要为grpc.UnaryInterceptor的参数实现一个函数：
+
+```go
+func filter(ctx context.Context,
+    req interface{}, info *grpc.UnaryServerInfo,
+    handler grpc.UnaryHandler,
+) (resp interface{}, err error) {
+    log.Println("fileter:", info)
+    return handler(ctx, req)
+}
+```
+
+函数的ctx和req参数就是每个普通的RPC方法的前两个参数。第三个info参数表示当前是对应的那个gRPC方法，第四个handler参数对应当前的gRPC方法函数。上面的函数中首先是日志输出info参数，然后调用handler对应的gRPC方法函数。
+
+要使用filter截取器函数，只需要在启动gRPC服务时作为参数输入即可：
+
+```go
+server := grpc.NewServer(grpc.UnaryInterceptor(filter))
+```
+
+如果截取器函数返回了错误，那么该次gRPC方法调用将被视作失败处理。因此，我们可以在截取器中对输入的参数做一些简单的验证工作。同样，也可以对handler返回的结果做一些验证工作。截取器也非常适合前面对Token认证工作。
+
+下面是截取器增加了对gRPC方法异常的捕获：
+
+```go
+func filter(
+    ctx context.Context, req interface{},
+    info *grpc.UnaryServerInfo,
+    handler grpc.UnaryHandler,
+) (resp interface{}, err error) {
+    log.Println("fileter:", info)
+
+    defer func() {
+        if r := recover(); r != nil {
+            err = fmt.Errorf("panic: %v", r)
+        }
+    }()
+
+    return handler(ctx, req)
+}
+```
+
+不过gRPC框架中只能为每个服务设置一个截取器，因此所有的截取工作只能在一个函数中完成。开源的grpc-ecosystem项目中的go-grpc-middleware包已经基于gRPC对截取器实现了链式截取器的支持。
+
+以下是go-grpc-middleware包中链式截取器的简单用法
+
+```go
+import "github.com/grpc-ecosystem/go-grpc-middleware"
+
+myServer := grpc.NewServer(
+    grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(
+        filter1, filter2, ...
+    )),
+    grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(
+        filter1, filter2, ...
+    )),
+)
+```
+
+### 和Web服务共存
+
+gRPC构建在HTTP/2协议之上，因此我们可以将gRPC服务和普通的Web服务架设在同一个端口之上。
+
+对于没有启动TLS协议的服务则需要对HTTP2/2特性做适当的调整：
+
+```go
+func main() {
+    mux := http.NewServeMux()
+
+    h2Handler := h2c.NewHandler(mux, &http2.Server{})
+    server = &http.Server{Addr: ":3999", Handler: h2Handler}
+    server.ListenAndServe()
+}
+```
+
+启用普通的https服务器则非常简单：
+
+```go
+func main() {
+    mux := http.NewServeMux()
+    mux.HandleFunc("/", func(w http.ResponseWriter, req *http.Request) {
+        fmt.Fprintln(w, "hello")
+    })
+
+    http.ListenAndServeTLS(port, "server.crt", "server.key",
+        http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+            mux.ServeHTTP(w, r)
+            return
+        }),
+    )
+}
+```
+
+而单独启用带证书的gRPC服务也是同样的简单：
+
+```go
+func main() {
+    creds, err := credentials.NewServerTLSFromFile("server.crt", "server.key")
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    grpcServer := grpc.NewServer(grpc.Creds(creds))
+
+    ...
+}
+```
+
+因为gRPC服务已经实现了ServeHTTP方法，可以直接作为Web路由处理对象。如果将gRPC和Web服务放在一起，会导致gRPC和Web路径的冲突，在处理时我们需要区分两类服务。
+
+通过以下方式生成同时支持Web和gRPC协议的路由处理函数：
+
+```go
+func main() {
+    ...
+
+    http.ListenAndServeTLS(port, "server.crt", "server.key",
+        http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+            if r.ProtoMajor != 2 {
+                mux.ServeHTTP(w, r)
+                return
+            }
+            if strings.Contains(
+                r.Header.Get("Content-Type"), "application/grpc",
+            ) {
+                grpcServer.ServeHTTP(w, r) // gRPC Server
+                return
+            }
+
+            mux.ServeHTTP(w, r)
+            return
+        }),
+    )
+}
+```
+
+首先gRPC是建立在HTTP/2版本之上，如果HTTP不是HTTP/2协议则必然无法提供gRPC支持。同时，每个gRPC调用请求的Content-Type类型会被标注为"application/grpc"类型。
+
+这样就可以在gRPC端口上同时提供Web服务了。
+
+curl触发http请求：
+
+```bash
+curl -k --cert client.pem https://localhost:1234
+```
+
+## 4.6 gRPC 和 Protobuf 扩展
