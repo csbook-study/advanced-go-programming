@@ -1,0 +1,16 @@
+syntax = "proto3";
+package hello;
+
+import "github.com/chai2010/pbgo/pbgo.proto";
+
+message String {
+    string value = 1;
+}
+
+service HelloService {
+    rpc Hello (String) returns (String) {
+        option (pbgo.rest_api) = {
+            get: "/hello/:value"
+        };
+    }
+}
