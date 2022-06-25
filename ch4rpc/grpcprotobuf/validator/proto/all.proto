@@ -1,0 +1,26 @@
+syntax = "proto3";
+
+package main;
+
+// 默认值
+import "google/protobuf/descriptor.proto";
+// 验证器
+import "github.com/mwitkow/go-proto-validators/validator.proto";
+
+option go_package=".";
+
+extend google.protobuf.FieldOptions {
+    string default_string = 50000;
+    int32 default_int = 50001;
+}
+
+message Message {
+    string name = 1 [(default_string) = "gopher"];
+    int32 age = 2[(default_int) = 10];
+    string important_string = 3 [
+        (validator.field) = {regex: "^[a-z]{2,5}$"}
+    ];
+    int32 age2 = 4 [
+        (validator.field) = {int_gt: 0, int_lt: 100}
+    ];
+}
