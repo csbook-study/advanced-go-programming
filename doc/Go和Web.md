@@ -327,3 +327,181 @@ throttler.go
 ```
 
 ## 5.4 请求校验
+
+### validator库原理
+
+定义如下的结构体：
+
+```go
+type Nested struct {
+    Email string `validate:"email"`
+}
+type T struct {
+    Age    int `validate:"eq=10"`
+    Nested Nested
+}
+```
+
+validator 树结构：
+
+![struct-tree](https://chai2010.cn/advanced-go-programming-book/images/ch6-04-validate-struct-tree.png)
+
+通过反射对结构体遍历。
+
+## 5.5 和数据库打交道
+
+### 从 database/sql 讲起
+
+Go官方提供了`database/sql`包来给用户进行和数据库打交道的工作，`database/sql`库实际只提供了一套操作数据库的接口和规范，例如抽象好的SQL预处理（prepare），连接池管理，数据绑定，事务，错误处理等等。官方并没有提供具体某种数据库实现的协议支持。
+
+和具体的数据库，例如MySQL打交道，还需要再引入MySQL的驱动，像下面这样：
+
+```go
+import "database/sql"
+import _ "github.com/go-sql-driver/mysql"
+
+db, err := sql.Open("mysql", "user:password@/dbname")
+```
+
+```go
+import _ "github.com/go-sql-driver/mysql"
+```
+
+这条import语句会调用了`mysql`包的`init`函数，做的事情也很简单：
+
+```go
+func init() {
+    sql.Register("mysql", &MySQLDriver{})
+}
+```
+
+在`sql`包的全局`map`里把`mysql`这个名字的`driver`注册上。`Driver`在`sql`包中是一个接口：
+
+```go
+type Driver interface {
+    Open(name string) (Conn, error)
+}
+```
+
+调用`sql.Open()`返回的`db`对象就是这里的`Conn`。
+
+```go
+type Conn interface {
+    Prepare(query string) (Stmt, error)
+    Close() error
+    Begin() (Tx, error)
+}
+```
+
+### 提高生产效率的ORM和SQL Builder
+
+对象关系映射（英语：Object Relational Mapping，简称ORM，或O/RM，或O/R mapping），是一种程序设计技术，用于实现面向对象编程语言里不同类型系统的数据之间的转换。从效果上说，它其实是创建了一个可在编程语言里使用的“虚拟对象数据库”。
+
+相比ORM来说，SQL Builder在SQL和项目可维护性之间取得了比较好的平衡。首先sql builder不像ORM那样屏蔽了过多的细节，其次从开发的角度来讲，SQL Builder进行简单封装后也可以非常高效地完成开发，举个例子：
+
+```go
+where := map[string]interface{} {
+    "order_id > ?" : 0,
+    "customer_id != ?" : 0,
+}
+limit := []int{0,100}
+orderBy := []string{"id asc", "create_time desc"}
+
+orders := orderModel.GetList(where, limit, orderBy)
+```
+
+### 脆弱的数据库
+
+无论是ORM还是SQL Builder都有一个致命的缺点，就是没有办法进行系统上线的事前sql审核。虽然很多ORM和SQL Builder也提供了运行期打印sql的功能，但只在查询的时候才能进行输出。而SQL Builder和ORM本身提供的功能太过灵活。使得你不可能通过测试枚举出所有可能在线上执行的sql。
+
+## 5.6 服务流量限制
+
+计算机程序可依据其瓶颈分为磁盘IO瓶颈型，CPU计算瓶颈型，网络带宽瓶颈型，分布式场景下有时候也会外部系统而导致自身瓶颈。
+
+Web系统打交道最多的是网络，无论是接收，解析用户请求，访问存储，还是把响应数据返回给用户，都是要走网络的。在没有`epoll/kqueue`之类的系统提供的IO多路复用接口之前，多个核心的现代计算机最头痛的是C10k问题，C10k问题会导致计算机没有办法充分利用CPU来处理更多的用户连接，进而没有办法通过优化程序提升CPU利用率来处理更多的请求。
+
+自从Linux实现了`epoll`，FreeBSD实现了`kqueue`，这个问题基本解决了，我们可以借助内核提供的API轻松解决当年的C10k问题，也就是说如今如果你的程序主要是和网络打交道，那么瓶颈一定在用户程序而不在操作系统内核。
+
+wrk对http服务压测，多次测试的结果在4万左右的QPS浮动，响应时间最多也就是40ms左右。压测命令：
+
+```bash
+wrk -c 10 -d 10s -t10 http://localhost:9090
+# Running 10s test @ http://localhost:9090
+#   10 threads and 10 connections
+#   Thread Stats   Avg      Stdev     Max   +/- Stdev
+#     Latency   334.76us    1.21ms  45.47ms   98.27%
+#     Req/Sec     4.42k   633.62     6.90k    71.16%
+#   443582 requests in 10.10s, 54.15MB read
+# Requests/sec:  43911.68
+# Transfer/sec:      5.36MB
+```
+
+对于IO/Network瓶颈类的程序，其表现是网卡/磁盘IO会先于CPU打满，这种情况即使优化CPU的使用也不能提高整个系统的吞吐量，只能提高磁盘的读写速度，增加内存大小，提升网卡的带宽来提升整体性能。而CPU瓶颈类的程序，则是在存储和网卡未打满之前CPU占用率先到达100%，CPU忙于各种计算任务，IO设备相对则较闲。
+
+无论哪种类型的服务，在资源使用到极限的时候都会导致请求堆积，超时，系统hang死，最终伤害到终端用户。对于分布式的Web服务来说，瓶颈还不一定总在系统内部，也有可能在外部。非计算密集型的系统往往会在关系型数据库环节失守，而这时候Web模块本身还远远未达到瓶颈。
+
+不管我们的服务瓶颈在哪里，最终要做的事情都是一样的，那就是流量限制。
+
+### 常见的流量限制手段
+
+流量限制的手段有很多，最常见的：漏桶、令牌桶两种：
+
+1. 漏桶是指我们有一个一直装满了水的桶，每过固定的一段时间即向外漏一滴水。如果你接到了这滴水，那么你就可以继续服务请求，如果没有接到，那么就需要等待下一滴水。
+2. 令牌桶则是指匀速向桶中添加令牌，服务请求时需要从桶中获取令牌，令牌的数目可以按照需要消耗的资源进行相应的调整。如果没有令牌，可以选择等待，或者放弃。
+
+这两种方法看起来很像，不过还是有区别的。漏桶流出的速率固定，而令牌桶只要在桶中有令牌，那就可以拿。也就是说令牌桶是允许一定程度的并发的，比如同一个时刻，有100个用户请求，只要令牌桶中有100个令牌，那么这100个请求全都会放过去。令牌桶在桶中没有令牌的情况下也会退化为漏桶模型。
+
+![token bucket](https://chai2010.cn/advanced-go-programming-book/images/ch5-token-bucket.png)
+
+实际应用中令牌桶应用较为广泛，开源界流行的限流器大多数都是基于令牌桶思想的。并且在此基础上进行了一定程度的扩充，比如`github.com/juju/ratelimit`提供了几种不同特色的令牌桶填充方式：
+
+```go
+func NewBucket(fillInterval time.Duration, capacity int64) *Bucket
+```
+
+默认的令牌桶，`fillInterval`指每过多长时间向桶里放一个令牌，`capacity`是桶的容量，超过桶容量的部分会被直接丢弃。桶初始是满的。
+
+```go
+func NewBucketWithQuantum(fillInterval time.Duration, capacity, quantum int64) *Bucket
+```
+
+和普通的`NewBucket()`的区别是，每次向桶中放令牌时，是放`quantum`个令牌，而不是一个令牌。
+
+```go
+func NewBucketWithRate(rate float64, capacity int64) *Bucket
+```
+
+这个就有点特殊了，会按照提供的比例，每秒钟填充令牌数。例如`capacity`是100，而`rate`是0.1，那么每秒会填充10个令牌。
+
+从桶中获取令牌也提供了几个API：
+
+```go
+func (tb *Bucket) Take(count int64) time.Duration {}
+func (tb *Bucket) TakeAvailable(count int64) int64 {}
+func (tb *Bucket) TakeMaxDuration(count int64, maxWait time.Duration) (
+    time.Duration, bool,
+) {}
+func (tb *Bucket) Wait(count int64) {}
+func (tb *Bucket) WaitMaxDuration(count int64, maxWait time.Duration) bool {}
+```
+
+### 令牌桶原理
+
+从功能上来看，令牌桶模型就是对全局计数的加减法操作过程，可以用buffered channel来完成简单的加令牌取令牌操作。
+
+令牌桶每隔一段固定的时间向桶中放令牌，如果我们记下上一次放令牌的时间为 t1，和当时的令牌数k1，放令牌的时间间隔为ti，每次向令牌桶中放x个令牌，令牌桶容量为cap。现在如果有人来调用`TakeAvailable`来取n个令牌，我们将这个时刻记为t2。在t2时刻，令牌桶中理论上应该有多少令牌呢？伪代码如下：
+
+```go
+cur = k1 + ((t2 - t1)/ti) * x
+cur = cur > cap ? cap : cur
+```
+
+我们用两个时间点的时间差，再结合其它的参数，理论上在取令牌之前就完全可以知道桶里有多少令牌了。那劳心费力地像本小节前面向channel里填充token的操作，理论上是没有必要的。只要在每次`Take`的时候，再对令牌桶中的token数进行简单计算，就可以得到正确的令牌数。是不是很像`惰性求值`的感觉？
+
+在得到正确的令牌数之后，再进行实际的`Take`操作就好，这个`Take`操作只需要对令牌数进行简单的减法即可，记得加锁以保证并发安全。
+
+### 服务瓶颈和QoS
+
+虽然性能指标很重要，但对用户提供服务时还应考虑服务整体的QoS。QoS全称是Quality of Service，顾名思义是服务质量。QoS包含有可用性、吞吐量、时延、时延变化和丢失等指标。一般来讲我们可以通过优化系统，来提高Web服务的CPU利用率，从而提高整个系统的吞吐量。但吞吐量提高的同时，用户体验是有可能变差的。用户角度比较敏感的除了可用性之外，还有时延。虽然你的系统吞吐量高，但半天刷不开页面，想必会造成大量的用户流失。所以在大公司的Web服务性能指标中，除了平均响应时延之外，还会把响应时间的95分位，99分位也拿出来作为性能标准。平均响应在提高CPU利用率没受到太大影响时，可能95分位、99分位的响应时间大幅度攀升了，那么这时候就要考虑提高这些CPU利用率所付出的代价是否值得了。
+
+在线系统的机器一般都会保持CPU有一定的余裕。
