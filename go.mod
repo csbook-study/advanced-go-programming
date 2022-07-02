@@ -14,6 +14,7 @@ require (
 	github.com/leodido/go-urn v1.2.1 // indirect
 	github.com/moby/moby v20.10.17+incompatible
 	github.com/mwitkow/go-proto-validators v0.3.2
+	github.com/spaolacci/murmur3 v1.1.0 // indirect
 	github.com/stretchr/testify v1.7.0
 	golang.org/x/text v0.3.7 // indirect
 	google.golang.org/genproto v0.0.0-20220624142145-8cd45d7dbd1f
