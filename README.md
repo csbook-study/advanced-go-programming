@@ -14,6 +14,8 @@ Go 语言高级编程 advanced go programming book code exercisec and study
 
 ├── ch5web Go和Web
 
+├── ch6cloud 分布式系统
+
 └── doc 文档
 
 ## 文档
@@ -27,3 +29,5 @@ Go 语言高级编程 advanced go programming book code exercisec and study
 第四章 PRC和Protobuf： [PRC和Protobuf](doc/PRC和Protobuf.md)
 
 第五章 Go和Web： [Go和Web](doc/Go和Web.md)
+
+第六章 分布式系统： [分布式系统](doc/分布式系统.md)
