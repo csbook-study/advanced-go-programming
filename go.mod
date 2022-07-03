@@ -19,6 +19,7 @@ require (
 	github.com/leodido/go-urn v1.2.1 // indirect
 	github.com/moby/moby v20.10.17+incompatible
 	github.com/mwitkow/go-proto-validators v0.3.2
+	github.com/olivere/elastic/v7 v7.0.32 // indirect
 	github.com/samuel/go-zookeeper v0.0.0-20201211165307-7117e9ea2414 // indirect
 	github.com/sony/sonyflake v1.0.0 // indirect
 	github.com/spaolacci/murmur3 v1.1.0 // indirect
