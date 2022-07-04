@@ -1,0 +1,8 @@
+{
+  "addr": "127.0.0.1:1080",
+  "aes_key": "01B345B7A9ABC00F0123456789ABCDAF",
+  "https": false,
+  "secret": "",
+  "private_key_path": "",
+  "cert_file_path": ""
+}
