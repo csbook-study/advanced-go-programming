@@ -4,7 +4,7 @@ Go 语言高级编程 advanced go programming book code exercisec and study
 
 ## 目录
 
-├── ch1basis 语言基础
+├── ch1basic 语言基础
 
 ├── ch2cgo CGO编程
 
