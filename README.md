@@ -4,6 +4,8 @@ Go 语言高级编程 advanced go programming book code exercisec and study
 
 ## 目录
 
+├── appendix 附录
+
 ├── ch1basic 语言基础
 
 ├── ch2cgo CGO编程
@@ -31,3 +33,5 @@ Go 语言高级编程 advanced go programming book code exercisec and study
 第五章 Go和Web： [Go和Web](doc/Go和Web.md)
 
 第六章 分布式系统： [分布式系统](doc/分布式系统.md)
+
+第六章 附录： [附录](doc/附录.md)

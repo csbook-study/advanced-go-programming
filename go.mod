@@ -33,7 +33,7 @@ require (
 	github.com/samuel/go-zookeeper v0.0.0-20201211165307-7117e9ea2414 // indirect
 	github.com/sony/sonyflake v1.0.0 // indirect
 	github.com/spaolacci/murmur3 v1.1.0 // indirect
-	github.com/stretchr/testify v1.7.0
+	github.com/stretchr/testify v1.8.0
 	github.com/temoto/robotstxt v1.1.2 // indirect
 	github.com/zieckey/etcdsync v0.0.0-20180810020013-cd5b26bc05a1 // indirect
 	golang.org/x/net v0.0.0-20220630215102-69896b714898 // indirect
